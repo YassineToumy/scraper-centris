@@ -1,0 +1,16 @@
+services:
+  centris:
+    build: .
+    container_name: scraper-centris
+    restart: unless-stopped
+    environment:
+      - MONGO_URI=${MONGO_URI}
+      - MONGO_DB=${MONGO_DB:-centris}
+      - MONGO_COLLECTION=${MONGO_COLLECTION:-locations}
+      - CENTRIS_SEARCH_URL=${CENTRIS_SEARCH_URL}
+      - CYCLE_SLEEP=${CYCLE_SLEEP:-86400}
+      - MAX_PAGES=${MAX_PAGES:-9999}
+      - MAX_DETAILS=${MAX_DETAILS:-999999}
+      - SCRAPE_24H_SKIP=${SCRAPE_24H_SKIP:-true}
+    volumes:
+      - ./logs:/app/logs
