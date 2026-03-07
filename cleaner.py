@@ -441,48 +441,52 @@ def run(source, clean, dry_run=False):
     batch = []
     rejection_samples = {}
 
-    for i, doc in enumerate(source.find(query, batch_size=BATCH_SIZE)):
-        try:
-            cleaned = clean_document(doc)
+    cursor = source.find(query, batch_size=BATCH_SIZE, no_cursor_timeout=True)
+    try:
+        for i, doc in enumerate(cursor):
+            try:
+                cleaned = clean_document(doc)
 
-            if not cleaned.get("source_id"):
+                if not cleaned.get("source_id"):
+                    stats["errors"] += 1
+                    continue
+
+                stats["cleaned"] += 1
+
+                valid, reason = validate(cleaned)
+                if not valid:
+                    stats[reason] = stats.get(reason, 0) + 1
+                    if reason not in rejection_samples:
+                        rejection_samples[reason] = {
+                            "source_id": cleaned.get("source_id"),
+                            "price": cleaned.get("price"),
+                            "city": cleaned.get("city"),
+                        }
+                    continue
+
+                cleaned.pop("_id", None)
+
+                if dry_run:
+                    stats["inserted"] += 1
+                    continue
+
+                batch.append(cleaned)
+
+                if len(batch) >= BATCH_SIZE:
+                    ins, dup = insert_batch(clean, batch)
+                    stats["inserted"] += ins
+                    stats["duplicates"] += dup
+                    batch = []
+                    pct = (i + 1) / pending * 100
+                    print(f"  {i+1}/{pending} ({pct:.1f}%) — {stats['inserted']} inserted",
+                          end="\r", flush=True)
+
+            except Exception as e:
                 stats["errors"] += 1
-                continue
-
-            stats["cleaned"] += 1
-
-            valid, reason = validate(cleaned)
-            if not valid:
-                stats[reason] = stats.get(reason, 0) + 1
-                if reason not in rejection_samples:
-                    rejection_samples[reason] = {
-                        "source_id": cleaned.get("source_id"),
-                        "price": cleaned.get("price"),
-                        "city": cleaned.get("city"),
-                    }
-                continue
-
-            cleaned.pop("_id", None)
-
-            if dry_run:
-                stats["inserted"] += 1
-                continue
-
-            batch.append(cleaned)
-
-            if len(batch) >= BATCH_SIZE:
-                ins, dup = insert_batch(clean, batch)
-                stats["inserted"] += ins
-                stats["duplicates"] += dup
-                batch = []
-                pct = (i + 1) / pending * 100
-                print(f"  {i+1}/{pending} ({pct:.1f}%) — {stats['inserted']} inserted",
-                      end="\r", flush=True)
-
-        except Exception as e:
-            stats["errors"] += 1
-            if stats["errors"] <= 5:
-                print(f"\n  Error on {doc.get('centris_no')}: {str(e)[:100]}")
+                if stats["errors"] <= 5:
+                    print(f"\n  Error on {doc.get('centris_no')}: {str(e)[:100]}")
+    finally:
+        cursor.close()
 
     if batch and not dry_run:
         ins, dup = insert_batch(clean, batch)
