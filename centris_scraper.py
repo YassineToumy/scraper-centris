@@ -37,7 +37,7 @@ load_dotenv()
 # CONFIG — all from environment variables
 # ──────────────────────────────────────────────
 
-MONGO_URI        = os.environ["MONGO_URI"]
+MONGO_URI        = os.environ["MONGODB_URI"]
 MONGO_DB         = os.getenv("MONGO_DB", "centris")
 MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "locations")
 CYCLE_SLEEP      = int(os.getenv("CYCLE_SLEEP", "86400"))   # seconds between full runs
@@ -45,16 +45,13 @@ MAX_PAGES        = int(os.getenv("MAX_PAGES", "9999"))      # 9999 = no limit
 MAX_DETAILS      = int(os.getenv("MAX_DETAILS", "999999"))  # 999999 = no limit
 SCRAPE_24H_SKIP  = os.getenv("SCRAPE_24H_SKIP", "true").lower() == "true"
 
-CENTRIS_SEARCH_URL = os.getenv(
-    "CENTRIS_SEARCH_URL",
-    (
-        "https://www.centris.ca/fr/propriete~a-louer"
-        "?q=H4sIAAAAAAAACo2QMQ-CQAyF_8vNDKy6GRON0RgjhoU4VO4BFw8Oe6AhhP9uiQ6oi536Xr_XJu1V"
-        "ab2aq1AF6sLuCl46DTFEuywzKbboXrL1WMPlTHXRRQXVkFwYKD-2scFDZHIWDeK02FP53pIZ24Dfw8z"
-        "Aah-Tbcd00r-MjRZ0SQ1yx51E7uNcrCO80agaQ1YNwRSOYK2p8lNX44Ovmi9wZ-7CLRg04aJbS4wV8E"
-        "NTpf9lx2MHlgdN4PAPZjYpNZyHJz4eXrmCAQAA"
-        "&sort=None&pageSize=20"
-    ),
+CENTRIS_SEARCH_URL = os.getenv("CENTRIS_SEARCH_URL") or (
+    "https://www.centris.ca/fr/propriete~a-louer"
+    "?q=H4sIAAAAAAAACo2QMQ-CQAyF_8vNDKy6GRON0RgjhoU4VO4BFw8Oe6AhhP9uiQ6oi536Xr_XJu1V"
+    "ab2aq1AF6sLuCl46DTFEuywzKbboXrL1WMPlTHXRRQXVkFwYKD-2scFDZHIWDeK02FP53pIZ24Dfw8z"
+    "Aah-Tbcd00r-MjRZ0SQ1yx51E7uNcrCO80agaQ1YNwRSOYK2p8lNX44Ovmi9wZ-7CLRg04aJbS4wV8E"
+    "NTpf9lx2MHlgdN4PAPZjYpNZyHJz4eXrmCAQAA"
+    "&sort=None&pageSize=20"
 )
 
 HEADERS = {
@@ -439,38 +436,50 @@ async def full_pipeline(search_url: str, max_pages: int = 2, max_details: int = 
     print("=" * 60)
 
     # ── Step 1: Get URLs from search ──
+    # Restart browser every BROWSER_RESTART_EVERY pages to prevent memory crash
+    BROWSER_RESTART_EVERY = 50
     detail_urls = []
+    pg = 0
+    done = False
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        ctx = await browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent=HEADERS["User-Agent"],
-            locale="fr-CA",
-        )
-        page = await ctx.new_page()
 
+        async def launch_browser():
+            browser = await p.chromium.launch(headless=True)
+            ctx = await browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent=HEADERS["User-Agent"],
+                locale="fr-CA",
+            )
+            page = await ctx.new_page()
+            return browser, page
+
+        async def dismiss_consent(page):
+            try:
+                btn = await page.query_selector(
+                    "#didomi-notice-agree-button, "
+                    "button[aria-label*='accepter'], "
+                    "button[aria-label*='Accepter'], "
+                    ".didomi-continue-without-agreeing, "
+                    "#didomi-notice-disagree-button"
+                )
+                if btn:
+                    await btn.click()
+                    await page.wait_for_timeout(1000)
+                    print("  🍪 Cookie popup dismissed")
+            except Exception:
+                pass
+
+        # First launch — navigate to search URL
+        browser, page = await launch_browser()
         print(f"\n🔍 Loading search: {search_url[:80]}...")
         await page.goto(search_url, wait_until="networkidle", timeout=30000)
         await page.wait_for_timeout(3000)
+        await dismiss_consent(page)
+        current_url = page.url
 
-        # Dismiss Didomi cookie consent popup if present
-        try:
-            consent_btn = await page.query_selector(
-                "#didomi-notice-agree-button, "
-                "button[aria-label*='accepter'], "
-                "button[aria-label*='Accepter'], "
-                ".didomi-continue-without-agreeing, "
-                "#didomi-notice-disagree-button"
-            )
-            if consent_btn:
-                await consent_btn.click()
-                await page.wait_for_timeout(1000)
-                print("  🍪 Cookie popup dismissed")
-        except Exception:
-            pass
-
-        for pg in range(1, max_pages + 1):
+        while not done and pg < max_pages:
+            pg += 1
             print(f"\n📄 Search page {pg}/{max_pages}")
 
             links = await page.eval_on_selector_all(
@@ -486,24 +495,46 @@ async def full_pipeline(search_url: str, max_pages: int = 2, max_details: int = 
             detail_urls.extend(new_links)
             print(f"  Found {len(new_links)} new URLs (total: {len(detail_urls)})")
 
-            if pg < max_pages:
-                next_btn = await page.query_selector(
-                    "li.next a, a.next, "
-                    "[data-action='next'], "
-                    "a[aria-label='Suivant'], "
-                    "a[aria-label='Next'], "
-                    ".pager-next a, "
-                    "li.pagination-next a"
-                )
-                if next_btn:
-                    # Scroll into view and use JS click to bypass any overlay
-                    await next_btn.scroll_into_view_if_needed()
-                    await page.evaluate("el => el.click()", next_btn)
-                    await page.wait_for_load_state("networkidle", timeout=15000)
-                    await page.wait_for_timeout(2000)
-                else:
-                    print("  No next page.")
-                    break
+            if pg >= max_pages:
+                break
+
+            # Find next page button
+            next_btn = await page.query_selector(
+                "li.next a, a.next, "
+                "[data-action='next'], "
+                "a[aria-label='Suivant'], "
+                "a[aria-label='Next'], "
+                ".pager-next a, "
+                "li.pagination-next a"
+            )
+            if not next_btn:
+                print("  No next page.")
+                break
+
+            # Get the next page URL before clicking (for browser restarts)
+            try:
+                next_url = await next_btn.get_attribute("href")
+                if next_url and not next_url.startswith("http"):
+                    next_url = "https://www.centris.ca" + next_url
+            except Exception:
+                next_url = None
+
+            # Restart browser every N pages to prevent memory crash
+            if pg % BROWSER_RESTART_EVERY == 0:
+                print(f"  ♻️  Restarting browser at page {pg} (memory management)...")
+                await browser.close()
+                browser, page = await launch_browser()
+                nav_url = next_url or current_url
+                await page.goto(nav_url, wait_until="networkidle", timeout=30000)
+                await page.wait_for_timeout(2000)
+                await dismiss_consent(page)
+                current_url = page.url
+            else:
+                await next_btn.scroll_into_view_if_needed()
+                await page.evaluate("el => el.click()", next_btn)
+                await page.wait_for_load_state("networkidle", timeout=15000)
+                await page.wait_for_timeout(2000)
+                current_url = page.url
 
         await browser.close()
 
@@ -512,8 +543,9 @@ async def full_pipeline(search_url: str, max_pages: int = 2, max_details: int = 
         return
 
     # ── Step 2 + 3: Scrape details → MongoDB ──
+    # Run in a thread so the blocking requests don't stall the asyncio event loop
     urls_to_scrape = detail_urls[:max_details]
-    results = scrape_and_store(urls_to_scrape)
+    results = await asyncio.to_thread(scrape_and_store, urls_to_scrape)
 
     # Also save local JSON backup
     Path("centris_backup.json").write_text(
@@ -541,7 +573,7 @@ if __name__ == "__main__":
                 max_pages=MAX_PAGES,
                 max_details=MAX_DETAILS,
             ))
-        except Exception as e:
+        except BaseException as e:
             print(f"\n❌ Pipeline failed: {e}")
 
         print(f"\n💤 Sleeping {CYCLE_SLEEP}s until next run...")
