@@ -2,7 +2,9 @@
 # Run a job with PID lock (prevents overlapping runs)
 set -uo pipefail
 
-set -a; source /etc/environment 2>/dev/null || true; set +a
+# Source env vars written with proper quoting by entrypoint.sh
+# shellcheck disable=SC1091
+source /app/.env_runtime 2>/dev/null || source /etc/environment 2>/dev/null || true
 
 JOB="$1"
 TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M-%S")
@@ -27,8 +29,14 @@ case "$JOB" in
     scraper)
         python -u centris_scraper.py 2>&1 | tee "$LOGFILE"
         ;;
+    cleaner)
+        python -u cleaner.py 2>&1 | tee "$LOGFILE"
+        ;;
+    sync)
+        python -u sync.py 2>&1 | tee "$LOGFILE"
+        ;;
     *)
-        echo "❌ Unknown job: ${JOB}. Use: scraper"
+        echo "❌ Unknown job: ${JOB}. Use: scraper | cleaner | sync"
         exit 1
         ;;
 esac
