@@ -53,4 +53,11 @@ fi
 # Rotate logs older than 30 days
 find /app/logs -name "${JOB}_*.log" -mtime +30 -delete 2>/dev/null || true
 
+# After scraper finishes, always trigger cleaner so new raw data gets cleaned immediately
+if [ "$JOB" = "scraper" ]; then
+    echo ""
+    echo "🧹 Scraper finished — triggering cleaner..."
+    /app/runner.sh cleaner
+fi
+
 exit $EXIT_CODE
