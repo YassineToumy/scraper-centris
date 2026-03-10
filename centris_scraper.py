@@ -478,6 +478,9 @@ async def full_pipeline(search_url: str, max_pages: int = 2, max_details: int = 
         await dismiss_consent(page)
         current_url = page.url
 
+        consecutive_empty = 0
+        MAX_CONSECUTIVE_EMPTY = 5  # stop if N pages in a row yield no new URLs
+
         while not done and pg < max_pages:
             pg += 1
             print(f"\n📄 Search page {pg}/{max_pages}")
@@ -494,6 +497,14 @@ async def full_pipeline(search_url: str, max_pages: int = 2, max_details: int = 
             new_links = list(set(links) - set(detail_urls))
             detail_urls.extend(new_links)
             print(f"  Found {len(new_links)} new URLs (total: {len(detail_urls)})")
+
+            if len(new_links) == 0:
+                consecutive_empty += 1
+                if consecutive_empty >= MAX_CONSECUTIVE_EMPTY:
+                    print(f"  {MAX_CONSECUTIVE_EMPTY} consecutive empty pages — stopping pagination.")
+                    break
+            else:
+                consecutive_empty = 0
 
             if pg >= max_pages:
                 break
@@ -525,7 +536,7 @@ async def full_pipeline(search_url: str, max_pages: int = 2, max_details: int = 
                 await browser.close()
                 browser, page = await launch_browser()
                 nav_url = next_url or current_url
-                await page.goto(nav_url, wait_until="networkidle", timeout=30000)
+                await page.goto(nav_url, wait_until="networkidle", timeout=60000)
                 await page.wait_for_timeout(2000)
                 await dismiss_consent(page)
                 current_url = page.url
