@@ -3,6 +3,8 @@ services:
     build: .
     container_name: scraper-centris
     restart: unless-stopped
+    env_file:
+      - ../.env
     environment:
       - MONGODB_URI=${MONGODB_URI}
       - MONGO_DB=${MONGO_DB:-centris}
