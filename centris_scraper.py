@@ -22,7 +22,7 @@ import os
 import re
 import time
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -573,20 +573,11 @@ async def full_pipeline(search_url: str, max_pages: int = 2, max_details: int = 
 if __name__ == "__main__":
     import asyncio
 
-    run = 1
-    while True:
-        print(f"\n{'=' * 60}")
-        print(f"  RUN #{run} — {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
-        print(f"{'=' * 60}")
-        try:
-            asyncio.run(full_pipeline(
-                search_url=CENTRIS_SEARCH_URL,
-                max_pages=MAX_PAGES,
-                max_details=MAX_DETAILS,
-            ))
-        except BaseException as e:
-            print(f"\n❌ Pipeline failed: {e}")
-
-        print(f"\n💤 Sleeping {CYCLE_SLEEP}s until next run...")
-        time.sleep(CYCLE_SLEEP)
-        run += 1
+    print(f"\n{'=' * 60}")
+    print(f"  RUN — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    print(f"{'=' * 60}")
+    asyncio.run(full_pipeline(
+        search_url=CENTRIS_SEARCH_URL,
+        max_pages=MAX_PAGES,
+        max_details=MAX_DETAILS,
+    ))
