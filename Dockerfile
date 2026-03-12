@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install --with-deps chromium
 
 # Copy scripts
-COPY centris_scraper.py cleaner.py sync.py storage.py ./
+COPY centris_scraper.py cleaner.py storage.py ./
 COPY entrypoint.sh /entrypoint.sh
 COPY runner.sh ./
 
