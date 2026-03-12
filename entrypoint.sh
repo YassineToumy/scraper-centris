@@ -19,7 +19,7 @@ cat > /etc/cron.d/centris <<'CRON'
 SHELL=/bin/bash
 PATH=/usr/local/bin:/usr/bin:/bin
 
-# Scraper — every 24h at 03:00 UTC; cleaner + sync chain automatically after
+# Scraper — every 24h at 03:00 UTC; cleaner chain automatically after
 0 3 * * * root /app/runner.sh scraper >> /app/logs/cron.log 2>&1
 
 CRON
@@ -27,7 +27,7 @@ CRON
 chmod 0644 /etc/cron.d/centris
 
 echo "✅ Cron schedule installed:"
-echo "   03:00  🕷️  Scraper → 🧹 Cleaner → 🔄 Sync (chained, daily)"
+echo "   03:00  🕷️  Scraper → 🧹 Cleaner (chained, daily)"
 echo ""
 
 # Verify connections
@@ -41,20 +41,10 @@ print('  ✅ MongoDB OK')
 c.close()
 " || echo "  ❌ MongoDB connection failed"
 
-echo "🔌 Testing PostgreSQL..."
-python -c "
-import psycopg2, os
-conn = psycopg2.connect(os.environ['POSTGRES_DSN'])
-cur = conn.cursor()
-cur.execute('SELECT 1')
-print('  ✅ PostgreSQL OK')
-conn.close()
-" || echo "  ❌ PostgreSQL connection failed"
-
 echo ""
-echo "🔄 Running initial pipeline on startup (scraper → cleaner → sync)..."
+echo "🔄 Running initial pipeline on startup (scraper → cleaner)..."
 
-# scraper chains cleaner, cleaner chains sync — one call runs all three
+# scraper chains cleaner — one call runs both
 /app/runner.sh scraper || echo "⚠️  Pipeline startup failed — will retry via cron"
 
 echo "══════════════════════════════════════════════════"
