@@ -13,6 +13,8 @@ Usage:
 
 import os
 import re
+import html
+import unicodedata
 import argparse
 from datetime import datetime, timezone
 from pymongo import MongoClient, UpdateOne, ASCENDING
@@ -179,10 +181,14 @@ def parse_year_built(raw: str) -> str | None:
 
 
 def clean_description(raw: str) -> str | None:
+    """Strip HTML, decode entities, normalize accents."""
     if not raw:
         return None
-    text = re.sub(r'[ \t]+', ' ', raw)
-    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r"<[^>]+>", " ", raw)
+    text = html.unescape(text)
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()
     return text if len(text) > 10 else None
 
