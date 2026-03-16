@@ -413,6 +413,8 @@ def insert_batch(col, batch):
 # ============================================================
 
 def run(source, clean, dry_run=False):
+    from bson import ObjectId
+
     total = source.count_documents({})
     print(f"  Source total: {total} docs")
 
@@ -420,19 +422,15 @@ def run(source, clean, dry_run=False):
     if not dry_run and clean is not None:
         print("  Loading already-cleaned IDs...")
         existing_ids = {
-            d.get("source_id") for d in clean.find({}, {"source_id": 1, "_id": 0})
-            if d.get("source_id")
+            str(d["source_id"]) for d in clean.find({}, {"source_id": 1, "_id": 0})
+            if d.get("source_id") is not None
         }
         print(f"  Already cleaned: {len(existing_ids)}")
 
-    if existing_ids:
-        query   = {"centris_no": {"$nin": list(existing_ids)}}
-        pending = source.count_documents(query)
-    else:
-        query   = {}
-        pending = total
+    base_query = {"centris_no": {"$nin": list(existing_ids)}} if existing_ids else {}
+    pending    = source.count_documents(base_query)
 
-    print(f"  Pending: {pending}\n")
+    print(f"  Pending (not yet cleaned): {pending}\n")
 
     if pending == 0:
         print("  Nothing new to clean.")
@@ -444,12 +442,24 @@ def run(source, clean, dry_run=False):
         "aberrant_surface": 0, "duplicates": 0, "errors": 0,
     }
 
-    batch = []
+    batch            = []
     rejection_samples = {}
+    processed        = 0
+    last_id          = None
 
-    cursor = source.find(query, batch_size=BATCH_SIZE, no_cursor_timeout=True)
-    try:
-        for i, doc in enumerate(cursor):
+    # ── Pagination par _id (évite les curseurs longue durée) ──
+    while True:
+        page_query = dict(base_query)
+        if last_id is not None:
+            page_query["_id"] = {"$gt": last_id}
+
+        page = list(source.find(page_query).sort("_id", ASCENDING).limit(BATCH_SIZE))
+        if not page:
+            break
+
+        last_id = page[-1]["_id"]
+
+        for doc in page:
             try:
                 cleaned = clean_document(doc)
 
@@ -478,21 +488,30 @@ def run(source, clean, dry_run=False):
 
                 batch.append(cleaned)
 
-                if len(batch) >= BATCH_SIZE:
-                    ins, dup = insert_batch(clean, batch)
-                    stats["inserted"] += ins
-                    stats["duplicates"] += dup
-                    batch = []
-                    pct = (i + 1) / pending * 100
-                    print(f"  {i+1}/{pending} ({pct:.1f}%) — {stats['inserted']} inserted",
-                          end="\r", flush=True)
-
             except Exception as e:
                 stats["errors"] += 1
-                if stats["errors"] <= 5:
-                    print(f"\n  Error on {doc.get('centris_no')}: {str(e)[:100]}")
-    finally:
-        cursor.close()
+                if stats["errors"] <= 10:
+                    import traceback
+                    print(f"\n  Error on {doc.get('centris_no')}: {str(e)[:200]}")
+                    traceback.print_exc()
+
+        processed += len(page)
+
+        # Flush batch après chaque page
+        if batch and not dry_run:
+            ins, dup = insert_batch(clean, batch)
+            stats["inserted"] += ins
+            stats["duplicates"] += dup
+            batch = []
+
+        pct = processed / pending * 100 if pending else 0
+        print(
+            f"  {processed}/{pending} ({pct:.1f}%) — "
+            f"{stats['inserted']} inserted | {stats['duplicates']} updated | "
+            f"{stats.get('invalid_price',0)} bad_price | {stats.get('missing_city',0)} no_city | "
+            f"{stats['errors']} errors",
+            flush=True,
+        )
 
     if batch and not dry_run:
         ins, dup = insert_batch(clean, batch)
