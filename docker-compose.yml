@@ -1,0 +1,22 @@
+services:
+  centris:
+    build: .
+    container_name: scraper-centris
+    restart: unless-stopped
+    environment:
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGO_DB=${MONGO_DB:-centris}
+      - MONGO_COLLECTION=${MONGO_COLLECTION:-locations}
+      - MONGO_COLLECTION_CLEAN=${MONGO_COLLECTION_CLEAN:-locations_clean}
+      - CENTRIS_SEARCH_URL=${CENTRIS_SEARCH_URL}
+      - CYCLE_SLEEP=${CYCLE_SLEEP:-86400}
+      - MAX_PAGES=${MAX_PAGES:-9999}
+      - MAX_DETAILS=${MAX_DETAILS:-999999}
+      - SCRAPE_24H_SKIP=${SCRAPE_24H_SKIP:-true}
+      - BATCH_SIZE=${BATCH_SIZE:-500}
+      - B2_KEY_ID=${B2_KEY_ID}
+      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY}
+      - B2_ENDPOINT=${B2_ENDPOINT:-https://s3.us-east-005.backblazeb2.com}
+      - B2_BUCKET=${B2_BUCKET:-immo-world}
+    volumes:
+      - ./logs:/app/logs
